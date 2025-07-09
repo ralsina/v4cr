@@ -6,7 +6,7 @@ A real-time video streaming server built with Crystal, Kemal, and the V4CR libra
 
 - **Real-time MJPEG streaming** - Live video feed accessible via web browser
 - **Auto device detection** - Automatically finds the first available capture device
-- **Multiple format support** - Tries MJPEG first, falls back to YUYV if needed
+- **MJPEG format requirement** - Only works with devices that support MJPEG format
 - **Multiple resolution support** - Tests different resolutions to find the best fit
 - **Web interface** - Clean HTML interface with stream controls
 - **Client management** - Tracks connected clients and handles disconnections
@@ -21,7 +21,7 @@ shards install
 # Start the server
 crystal run examples/streaming_server.cr
 
-# Server will start on http://localhost:3000
+# Server will start on http://localhost:3100
 ```
 
 ## Endpoints
@@ -54,9 +54,13 @@ JSON status endpoint returning:
 ## Technical Details
 
 ### Format Selection
-The server tries formats in this order:
-1. MJPEG at various resolutions (320x240, 640x480, 800x600, 1024x768)
-2. YUYV at 640x480 (fallback)
+The server requires MJPEG format and tries these resolutions in order:
+1. MJPEG at 320x240
+2. MJPEG at 640x480  
+3. MJPEG at 800x600
+4. MJPEG at 1024x768
+
+If no MJPEG format is supported, the server will exit with an error message.
 
 ### Frame Rate
 - Target: ~30 FPS (33ms delay between frames)
@@ -64,7 +68,8 @@ The server tries formats in this order:
 
 ### Buffer Management
 - Uses 4 memory-mapped buffers for efficient frame capture
-- Automatic buffer queuing/dequeuing
+- Proper streaming initialization with buffer pre-queuing
+- Continuous dequeue/requeue cycle for smooth streaming
 - Proper cleanup on client disconnections
 
 ### Client Management
@@ -93,7 +98,7 @@ The server tries formats in this order:
 # Start server
 crystal run examples/streaming_server.cr
 
-# Open browser to http://localhost:3000
+# Open browser to http://localhost:3100
 # Multiple clients can connect simultaneously
 # Each client receives the same live stream
 ```
@@ -101,15 +106,16 @@ crystal run examples/streaming_server.cr
 ## Error Handling
 
 - **Device not found**: Server exits with error message
-- **Format not supported**: Falls back to alternative formats
+- **MJPEG format not supported**: Server exits with error message explaining the requirement
 - **Client disconnection**: Automatically removes client from broadcast list
 - **Stream errors**: Automatically retries with 1-second delay
 
 ## Performance Notes
 
-- MJPEG format provides good compression (~15-20KB per frame)
-- Raw YUYV format uses more bandwidth (~600KB per frame)
+- MJPEG format provides good compression and quality (~15-20KB per frame)
+- Direct JPEG streaming without conversion for optimal performance
 - Frame rate adjusts automatically based on system performance
 - Memory usage stays constant with buffer reuse
+- Requires hardware or driver MJPEG support for best results
 
 This streaming server demonstrates real-world usage of the V4CR library for video streaming applications.

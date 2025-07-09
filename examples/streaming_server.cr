@@ -51,16 +51,9 @@ class StreamingServer
             end
           end
           
-          # If MJPEG failed, try YUYV
-          begin
-            test_device.set_format(640_u32, 480_u32, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
-            puts "Using device: #{device_path} (#{capability.card}) - YUYV (MJPEG not supported)"
-            @@device = test_device
-            return test_device
-          rescue e
-            puts "Device #{device_path} doesn't support YUYV either: #{e.message}"
-            test_device.close
-          end
+          # If MJPEG failed, this device is not suitable for streaming
+          puts "Device #{device_path} doesn't support MJPEG format"
+          test_device.close
         else
           test_device.close
         end
@@ -81,8 +74,8 @@ class StreamingServer
         break unless @@device
         
         begin
-          # Capture a frame
-          buffer = @@device.not_nil!.capture_frame
+          # Dequeue a frame from the already-started streaming
+          buffer = @@device.not_nil!.dequeue_buffer
           
           # Send frame to all connected clients
           clients_to_remove = [] of HTTP::Server::Context
@@ -101,6 +94,9 @@ class StreamingServer
               clients_to_remove << client
             end
           end
+          
+          # Re-queue the buffer for next capture
+          @@device.not_nil!.queue_buffer(buffer)
           
           # Remove disconnected clients
           clients_to_remove.each do |client|
@@ -133,11 +129,18 @@ end
 device = StreamingServer.initialize_device
 unless device
   puts "No suitable video device found!"
+  puts "This server requires a device that supports MJPEG format."
   exit(1)
 end
 
 # Start streaming
 device.request_buffers(4)
+
+# Queue all buffers
+device.buffer_manager.not_nil!.each do |buffer|
+  device.queue_buffer(buffer)
+end
+
 device.start_streaming
 StreamingServer.start_streaming_fiber
 
@@ -145,7 +148,7 @@ puts "V4CR MJPEG Streaming Server"
 puts "=========================="
 puts "Device: #{device.query_capability.card}"
 puts "Format: #{device.get_format.format_name} #{device.get_format.width}x#{device.get_format.height}"
-puts "Server starting on http://localhost:3000"
+puts "Server starting on http://localhost:3100"
 
 # Main page
 get "/" do
@@ -279,7 +282,7 @@ get "/stream" do |env|
   # Keep connection open
   begin
     loop do
-      sleep(1)
+      ::sleep(1.seconds)
     end
   rescue e
     puts "Client disconnected: #{e.message}"
@@ -311,4 +314,4 @@ Signal::INT.trap do
   exit(0)
 end
 
-Kemal.run
+Kemal.run(port:3100)
