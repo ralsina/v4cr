@@ -1,0 +1,9 @@
+name: v4cr
+version: 0.1.0
+
+authors:
+  - ralsina <roberto.alsina@gmail.com>
+
+crystal: '>= 1.16.3'
+
+license: MIT
