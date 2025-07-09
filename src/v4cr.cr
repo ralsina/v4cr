@@ -4,7 +4,7 @@
 # devices on Linux systems using the v4l2 API.
 #
 # Basic usage:
-# ```crystal
+# ```
 # require "v4cr"
 #
 # device = V4cr::Device.new("/dev/video0")

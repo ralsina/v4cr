@@ -103,8 +103,8 @@ module V4cr
       # Cast the format data to pix format
       pix = v4l2_format.fmt_data.to_unsafe.as(LibV4L2::V4l2PixFormat*)
       format = Format.new(0_u32, "Current Format", pix.value.pixelformat, 0_u32,
-                         pix.value.width, pix.value.height, pix.value.bytesperline, pix.value.sizeimage)
-      
+        pix.value.width, pix.value.height, pix.value.bytesperline, pix.value.sizeimage)
+
       @current_format = format
       format
     end
@@ -115,7 +115,7 @@ module V4cr
 
       v4l2_format = LibV4L2::V4l2Format.new
       v4l2_format.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
-      
+
       # Cast the format data to pix format and set values
       pix = v4l2_format.fmt_data.to_unsafe.as(LibV4L2::V4l2PixFormat*)
       pix.value.width = width
@@ -147,13 +147,13 @@ module V4cr
       # Set up individual buffers
       req_bufs.count.times do |i|
         buffer = query_buffer(i.to_u32)
-        
+
         if memory_type == LibV4L2::V4L2_MEMORY_MMAP
           # Map the buffer
           ptr = LibC.mmap(nil, buffer.length, LibV4L2::PROT_READ | LibV4L2::PROT_WRITE,
-                            LibV4L2::MAP_SHARED, @fd.not_nil!, buffer.offset.not_nil!)
+            LibV4L2::MAP_SHARED, @fd.not_nil!, buffer.offset.not_nil!)
           raise DeviceError.new("Failed to mmap buffer") if ptr == LibV4L2::MAP_FAILED
-          
+
           buffer.set_mmap_info(buffer.offset.not_nil!, ptr)
         end
 
@@ -177,7 +177,7 @@ module V4cr
 
       timestamp = Time.unix(v4l2_buf.timestamp.tv_sec) + Time::Span.new(nanoseconds: v4l2_buf.timestamp.tv_usec * 1000)
       buffer = Buffer.new(v4l2_buf.index, v4l2_buf.length, v4l2_buf.bytesused,
-                         v4l2_buf.flags, v4l2_buf.sequence, timestamp)
+        v4l2_buf.flags, v4l2_buf.sequence, timestamp)
 
       # Store offset for later mmap
       buffer.set_mmap_info(v4l2_buf.m.offset, Pointer(Void).null)
@@ -208,30 +208,30 @@ module V4cr
 
       # Try to dequeue with retries for non-blocking mode
       retries = 0
-      max_retries = 100  # ~1 second timeout with 10ms sleep
-      
+      max_retries = 100 # ~1 second timeout with 10ms sleep
+
       loop do
         result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_DQBUF, pointerof(v4l2_buf))
         if result >= 0
           break
         end
-        
+
         retries += 1
         if retries > max_retries
           raise DeviceError.new("Failed to dequeue buffer (timeout)")
         end
-        
+
         # Sleep for a short time before retrying
-        sleep(Time::Span.new(nanoseconds: 10_000_000))  # 10ms
+        sleep(Time::Span.new(nanoseconds: 10_000_000)) # 10ms
       end
 
       # Find the buffer in our manager
       original_buffer = @buffer_manager.not_nil![v4l2_buf.index]
-      
+
       # Update buffer information
       timestamp = Time.unix(v4l2_buf.timestamp.tv_sec) + Time::Span.new(nanoseconds: v4l2_buf.timestamp.tv_usec * 1000)
       Buffer.new(v4l2_buf.index, v4l2_buf.length, v4l2_buf.bytesused,
-                v4l2_buf.flags, v4l2_buf.sequence, timestamp).tap do |updated_buffer|
+        v4l2_buf.flags, v4l2_buf.sequence, timestamp).tap do |updated_buffer|
         if original_buffer.mmap_ptr && original_buffer.mmap_ptr != Pointer(Void).null
           updated_buffer.set_mmap_info(original_buffer.offset.not_nil!, original_buffer.mmap_ptr.not_nil!)
         end
@@ -275,10 +275,10 @@ module V4cr
       begin
         # Wait for a frame
         buffer = dequeue_buffer
-        
+
         # Re-queue the buffer for next capture
         queue_buffer(buffer)
-        
+
         return buffer
       ensure
         stop_streaming

@@ -16,7 +16,7 @@ module V4cr
     # For userptr buffers
     getter userptr : UInt64?
 
-    def initialize(@index : UInt32, @length : UInt32, @bytesused : UInt32, 
+    def initialize(@index : UInt32, @length : UInt32, @bytesused : UInt32,
                    @flags : UInt32, @sequence : UInt32, @timestamp : Time)
       @data = nil
       @offset = nil
@@ -104,11 +104,11 @@ module V4cr
       @buffers.size
     end
 
-    def each
+    def each(&)
       @buffers.each { |buffer| yield buffer }
     end
 
-    def each_with_index
+    def each_with_index(&)
       @buffers.each_with_index { |buffer, index| yield buffer, index }
     end
 

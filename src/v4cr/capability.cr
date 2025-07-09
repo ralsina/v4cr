@@ -8,7 +8,7 @@ module V4cr
     getter capabilities : UInt32
     getter device_caps : UInt32
 
-    def initialize(@driver : String, @card : String, @bus_info : String, 
+    def initialize(@driver : String, @card : String, @bus_info : String,
                    @version : UInt32, @capabilities : UInt32, @device_caps : UInt32)
     end
 

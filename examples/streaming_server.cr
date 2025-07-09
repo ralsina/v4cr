@@ -24,21 +24,22 @@ class StreamingServer
     0.upto(9) do |i|
       device_path = "/dev/video#{i}"
       next unless File.exists?(device_path)
-      
+
       begin
         test_device = V4cr::Device.new(device_path)
         test_device.open
-        
+
         capability = test_device.query_capability
         if capability.video_capture?
           # Try to set MJPEG format with different resolutions
           mjpeg_formats = [
+            {1920_u32, 1080_u32},
             {320_u32, 240_u32},
             {640_u32, 480_u32},
             {800_u32, 600_u32},
-            {1024_u32, 768_u32}
+            {1024_u32, 768_u32},
           ]
-          
+
           mjpeg_success = false
           mjpeg_formats.each do |width, height|
             begin
@@ -50,7 +51,7 @@ class StreamingServer
               # Try next resolution
             end
           end
-          
+
           # If MJPEG failed, this device is not suitable for streaming
           puts "Device #{device_path} doesn't support MJPEG format"
           test_device.close
@@ -61,51 +62,64 @@ class StreamingServer
         puts "Error with device #{device_path}: #{e.message}"
       end
     end
-    
+
     nil
   end
 
   # Streaming fiber that captures frames and sends them to clients
   def self.start_streaming_fiber
     return if @@streaming_fiber
-    
+
     @@streaming_fiber = spawn do
       loop do
         break unless @@device
-        
+
         begin
           # Dequeue a frame from the already-started streaming
           buffer = @@device.not_nil!.dequeue_buffer
-          
-          # Send frame to all connected clients
-          clients_to_remove = [] of HTTP::Server::Context
-          
-          @@streaming_clients.each do |client|
-            begin
-              # Write MJPEG frame with boundary
-              client.response.write("--#{BOUNDARY}\r\n".to_slice)
-              client.response.write("Content-Type: image/jpeg\r\n".to_slice)
-              client.response.write("Content-Length: #{buffer.data.size}\r\n\r\n".to_slice)
-              client.response.write(buffer.data)
-              client.response.write("\r\n".to_slice)
-              client.response.flush
-            rescue e
-              puts "Client disconnected: #{e.message}"
-              clients_to_remove << client
+
+          # Debug: print first 32 bytes of the buffer for the first frame
+          unless ENV["DEBUG_JPEG"]? == "done"
+            debug_bytes = buffer.data[0, Math.min(32, buffer.data.size)].map { |b| "%02X" % b }.join(" ")
+            puts "[DEBUG] First 32 bytes: #{debug_bytes} (size=#{buffer.data.size})"
+            ENV["DEBUG_JPEG"] = "done"
+          end
+
+          # Skip frames that are too small, do not start with JPEG SOI, or do not end with JPEG EOI marker
+          data = buffer.data
+          valid_jpeg = buffer.bytesused >= 1000 && data[0] == 0xFF && data[1] == 0xD8 && data[-2] == 0xFF && data[-1] == 0xD9
+
+          if valid_jpeg
+            # Send frame to all connected clients
+            clients_to_remove = [] of HTTP::Server::Context
+
+            @@streaming_clients.each do |client|
+              begin
+                # Write MJPEG frame with boundary
+                client.response.write("--#{BOUNDARY}\r\n".to_slice)
+                client.response.write("Content-Type: image/jpeg\r\n".to_slice)
+                client.response.write("Content-Length: #{buffer.bytesused}\r\n\r\n".to_slice)
+                client.response.write(buffer.data)
+                client.response.write("\r\n".to_slice)
+                client.response.flush
+              rescue e
+                puts "Client disconnected: #{e.message}"
+                clients_to_remove << client
+              end
             end
           end
-          
-          # Re-queue the buffer for next capture
+
+          # Always re-queue the buffer for next capture
           @@device.not_nil!.queue_buffer(buffer)
-          
+
           # Remove disconnected clients
-          clients_to_remove.each do |client|
+          (clients_to_remove || [] of HTTP::Server::Context).each do |client|
             @@streaming_clients.delete(client)
           end
-          
+
           # Small delay to control frame rate
-          sleep(33.milliseconds)  # ~30 FPS
-          
+          sleep(33.milliseconds) # ~30 FPS
+
         rescue e
           puts "Streaming error: #{e.message}"
           sleep(1.second)
@@ -117,7 +131,7 @@ class StreamingServer
   def self.cleanup
     puts "Shutting down..."
     @@streaming_clients.clear
-    
+
     if @@device
       @@device.try(&.stop_streaming)
       @@device.try(&.close)
@@ -134,10 +148,14 @@ unless device
 end
 
 # Start streaming
+format = device.get_format
+puts "[DEBUG] Format: #{format.format_name} #{format.width}x#{format.height} sizeimage=#{format.sizeimage}"
+
 device.request_buffers(4)
 
 # Queue all buffers
-device.buffer_manager.not_nil!.each do |buffer|
+device.buffer_manager.not_nil!.each_with_index do |buffer, idx|
+  puts "[DEBUG] Buffer \\##{idx} length: \\#{buffer.length}"
   device.queue_buffer(buffer)
 end
 
@@ -273,12 +291,12 @@ get "/stream" do |env|
   env.response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=#{StreamingServer::BOUNDARY}"
   env.response.headers["Cache-Control"] = "no-cache"
   env.response.headers["Connection"] = "keep-alive"
-  
+
   # Add client to streaming list
   StreamingServer.streaming_clients << env
-  
+
   puts "Client connected (#{StreamingServer.streaming_clients.size} total)"
-  
+
   # Keep connection open
   begin
     loop do
@@ -297,8 +315,8 @@ get "/status" do |env|
   env.response.content_type = "application/json"
   {
     clients: StreamingServer.streaming_clients.size,
-    device: StreamingServer.device.try(&.query_capability.card) || "Unknown",
-    format: StreamingServer.device.try(&.get_format.format_name) || "Unknown"
+    device:  StreamingServer.device.try(&.query_capability.card) || "Unknown",
+    format:  StreamingServer.device.try(&.get_format.format_name) || "Unknown",
   }.to_json
 end
 
@@ -314,4 +332,4 @@ Signal::INT.trap do
   exit(0)
 end
 
-Kemal.run(port:3100)
+Kemal.run(port: 3100)

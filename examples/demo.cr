@@ -28,38 +28,38 @@ def find_capture_device
   0.upto(9) do |i|
     device_path = "/dev/video#{i}"
     next unless File.exists?(device_path)
-    
+
     begin
       device = V4cr::Device.new(device_path)
       device.open
-      
+
       capability = device.query_capability
       if capability.video_capture?
         device.close
         return device_path
       end
-      
+
       device.close
     rescue e : V4cr::DeviceError
       # Continue to next device
     end
   end
-  
+
   nil
 end
 
 # Example: List all video devices and their capabilities
 def list_devices
   puts "Scanning for video devices..."
-  
+
   0.upto(9) do |i|
     device_path = "/dev/video#{i}"
     next unless File.exists?(device_path)
-    
+
     begin
       device = V4cr::Device.new(device_path)
       device.open
-      
+
       capability = device.query_capability
       puts "\nDevice: #{device_path}"
       puts "  Card: #{capability.card}"
@@ -71,7 +71,7 @@ def list_devices
       puts "    Video Output: #{capability.video_output?}"
       puts "    Streaming: #{capability.streaming?}"
       puts "    Read/Write: #{capability.readwrite?}"
-      
+
       # List supported formats
       formats = device.supported_formats
       if formats.any?
@@ -80,7 +80,7 @@ def list_devices
           puts "    #{format.format_name} - #{format.description}"
         end
       end
-      
+
       # List inputs
       inputs = device.inputs
       if inputs.any?
@@ -90,7 +90,7 @@ def list_devices
           puts "  #{marker} #{idx}: #{input}"
         end
       end
-      
+
       device.close
     rescue e : V4cr::DeviceError
       puts "  Error: #{e.message}"
@@ -104,21 +104,21 @@ def capture_example(device_path : String)
     puts "No video device found at #{device_path}"
     return
   end
-  
+
   begin
     device = V4cr::Device.new(device_path)
     device.open
-    
+
     capability = device.query_capability
     puts "Capturing from: #{capability.card}"
-    
+
     # Check if device supports capture
     unless capability.video_capture?
       puts "Device does not support video capture"
       device.close
       return
     end
-    
+
     # Try MJPEG first, fall back to YUYV
     format = begin
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
@@ -126,29 +126,28 @@ def capture_example(device_path : String)
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end
     puts "Format set to: #{format.format_name} #{format.width}x#{format.height}"
-    
+
     # Capture a frame
     puts "Capturing frame..."
     buffer = device.capture_frame
-    
+
     puts "Captured frame:"
     puts "  Size: #{buffer.data.size} bytes"
     puts "  Sequence: #{buffer.sequence}"
-    
+
     # Better timestamp formatting
     if buffer.timestamp.year > 2000
       puts "  Timestamp: #{buffer.timestamp.to_s("%Y-%m-%d %H:%M:%S")}"
     else
       puts "  Timestamp: #{buffer.timestamp} (relative)"
     end
-    
+
     # Show some basic frame info
     if buffer.data.size > 0
       puts "  Frame data preview: #{buffer.data[0...[10, buffer.data.size].min].map(&.to_s(16)).join(" ")}"
     end
-    
+
     device.close
-    
   rescue e : V4cr::DeviceError
     puts "Device error: #{e.message}"
   rescue e : V4cr::Error
@@ -162,21 +161,21 @@ def streaming_example(device_path : String)
     puts "No video device found at #{device_path}"
     return
   end
-  
+
   begin
     device = V4cr::Device.new(device_path)
     device.open
-    
+
     capability = device.query_capability
     puts "Streaming from: #{capability.card}"
-    
+
     # Check if device supports capture
     unless capability.video_capture?
       puts "Device does not support video capture"
       device.close
       return
     end
-    
+
     # Try MJPEG first, fall back to YUYV
     format = begin
       device.set_format(320, 240, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
@@ -184,35 +183,34 @@ def streaming_example(device_path : String)
       device.set_format(320, 240, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end
     puts "Format: #{format.format_name} #{format.width}x#{format.height}"
-    
+
     # Request buffers
     buffer_manager = device.request_buffers(4)
     puts "Requested #{buffer_manager.size} buffers"
-    
+
     # Queue all buffers
     buffer_manager.each do |buffer|
       device.queue_buffer(buffer)
     end
-    
+
     # Start streaming
     device.start_streaming
     puts "Streaming started, capturing 10 frames..."
-    
+
     # Capture frames
     10.times do |i|
       buffer = device.dequeue_buffer
       puts "Frame #{i + 1}: #{buffer.data.size} bytes, sequence: #{buffer.sequence}"
-      
+
       # Re-queue the buffer
       device.queue_buffer(buffer)
     end
-    
+
     # Stop streaming
     device.stop_streaming
     puts "Streaming stopped"
-    
+
     device.close
-    
   rescue e : V4cr::DeviceError
     puts "Device error: #{e.message}"
   rescue e : V4cr::Error
@@ -226,21 +224,21 @@ def save_frames_example(device_path : String, count : Int32 = 5000)
     puts "No video device found at #{device_path}"
     return
   end
-  
+
   begin
     device = V4cr::Device.new(device_path)
     device.open
-    
+
     capability = device.query_capability
     puts "Saving frames from: #{capability.card}"
-    
+
     # Check if device supports capture
     unless capability.video_capture?
       puts "Device does not support video capture"
       device.close
       return
     end
-    
+
     # Try MJPEG first, fall back to YUYV
     format = begin
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
@@ -248,27 +246,27 @@ def save_frames_example(device_path : String, count : Int32 = 5000)
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end
     puts "Format: #{format.format_name} #{format.width}x#{format.height}"
-    
+
     # Request buffers
     buffer_manager = device.request_buffers(4)
     puts "Requested #{buffer_manager.size} buffers"
-    
+
     # Queue all buffers
     buffer_manager.each do |buffer|
       device.queue_buffer(buffer)
     end
-    
+
     # Start streaming
     device.start_streaming
     puts "Streaming started, capturing #{count} frames to files..."
-    
+
     # Create output directory
     Dir.mkdir_p("captured_frames")
-    
+
     # Capture frames
     count.times do |i|
       buffer = device.dequeue_buffer
-      
+
       # Determine file extension and save appropriately
       if format.format_name == "MJPG"
         # MJPEG frames are already JPEG compressed
@@ -281,23 +279,22 @@ def save_frames_example(device_path : String, count : Int32 = 5000)
         File.write(filename, buffer.data)
         puts "Frame #{i + 1}: #{buffer.data.size} bytes saved to #{filename} (raw #{format.format_name})"
       end
-      
+
       # Re-queue the buffer
       device.queue_buffer(buffer)
     end
-    
+
     # Stop streaming
     device.stop_streaming
     puts "Streaming stopped"
-    
+
     if format.format_name == "MJPG"
       puts "JPEG frames saved to captured_frames/ directory"
     else
       puts "Raw #{format.format_name} frames saved to captured_frames/ directory"
     end
-    
+
     device.close
-    
   rescue e : V4cr::DeviceError
     puts "Device error: #{e.message}"
   rescue e : V4cr::Error
@@ -331,11 +328,11 @@ puts
 
 # Get choice from command line or stdin
 choice = if ARGV.size > 1
-  ARGV[1]  # If device path is provided, get choice from second argument
-else
-  print "Select an option (1-5): "
-  gets.try(&.strip)
-end
+           ARGV[1] # If device path is provided, get choice from second argument
+         else
+           print "Select an option (1-5): "
+           gets.try(&.strip)
+         end
 
 case choice
 when "1"
