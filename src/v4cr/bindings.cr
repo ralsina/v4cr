@@ -59,6 +59,9 @@ module V4cr
     V4L2_PIX_FMT_MJPEG   = 0x4745504D_u32
     V4L2_PIX_FMT_JPEG    = 0x4745504A_u32
 
+    # Control IDs
+    V4L2_CID_JPEG_COMPRESSION_QUALITY = 0x009d0903_u32
+
     # Buffer flags
     V4L2_BUF_FLAG_MAPPED = 0x00000001_u32
     V4L2_BUF_FLAG_QUEUED = 0x00000002_u32
@@ -144,6 +147,23 @@ module V4cr
       offset : UInt32
       userptr : UInt64
       fd : Int32
+    end
+
+    struct V4l2Control
+      id : UInt32
+      value : Int32
+    end
+
+    struct V4l2QueryControl
+      id : UInt32
+      type : UInt32
+      name : UInt8[32]
+      minimum : Int32
+      maximum : Int32
+      step : Int32
+      default_value : Int32
+      flags : UInt32
+      reserved : UInt32[2]
     end
 
     struct V4l2Input

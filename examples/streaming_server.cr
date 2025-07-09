@@ -159,7 +159,7 @@ device.request_buffers(4)
 
 # Queue all buffers
 device.buffer_manager.each_with_index do |buffer, idx|
-  puts "[DEBUG] Buffer \\##{idx} length: \\#{buffer.length}"
+  puts "[DEBUG] Buffer \##{idx} length: \#{buffer.length}"
   device.queue_buffer(buffer)
 end
 
