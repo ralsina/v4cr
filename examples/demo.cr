@@ -74,7 +74,7 @@ def list_devices
 
       # List supported formats
       formats = device.supported_formats
-      if formats.any?
+      if !formats.empty?
         puts "  Supported Formats:"
         formats.each do |format|
           puts "    #{format.format_name} - #{format.description}"
@@ -83,7 +83,7 @@ def list_devices
 
       # List inputs
       inputs = device.inputs
-      if inputs.any?
+      if !inputs.empty?
         puts "  Inputs:"
         inputs.each_with_index do |input, idx|
           marker = idx == device.current_input ? "*" : " "

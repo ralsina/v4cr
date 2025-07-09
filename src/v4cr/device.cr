@@ -5,13 +5,13 @@ module V4cr
     getter fd : Int32?
     getter capability : Capability?
     getter current_format : Format?
-    getter buffer_manager : BufferManager?
+    getter buffer_manager : BufferManager
 
     def initialize(@device_path : String)
       @fd = nil
       @capability = nil
       @current_format = nil
-      @buffer_manager = nil
+      @buffer_manager = BufferManager.new(0, LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE, LibV4L2::V4L2_MEMORY_MMAP)
     end
 
     # Open the device
@@ -29,16 +29,16 @@ module V4cr
     def close
       if @fd
         # Clean up buffers if they exist
-        if @buffer_manager
-          @buffer_manager.not_nil!.each do |buffer|
-            if ptr = buffer.mmap_ptr
-              LibC.munmap(ptr, buffer.length)
-            end
+        @buffer_manager.each do |buffer|
+          if buffer.mmap_ptr != Pointer(Void).null
+            LibC.munmap(buffer.mmap_ptr, buffer.length)
           end
-          @buffer_manager = nil
         end
+        @buffer_manager = BufferManager.new(0, LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE, LibV4L2::V4L2_MEMORY_MMAP)
 
-        LibC.close(@fd.not_nil!)
+        if @fd
+          LibC.close(@fd.as(Int32))
+        end
         @fd = nil
         @capability = nil
         @current_format = nil
@@ -55,7 +55,8 @@ module V4cr
       ensure_open
 
       cap = LibV4L2::V4l2Capability.new
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_QUERYCAP, pointerof(cap))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_QUERYCAP, pointerof(cap))
       raise DeviceError.new("Failed to query capabilities") if result < 0
 
       driver = String.new(cap.driver.to_unsafe)
@@ -77,7 +78,8 @@ module V4cr
         fmt_desc.index = index
         fmt_desc.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
 
-        result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_ENUM_FMT, pointerof(fmt_desc))
+        raise DeviceError.new("Device not open") unless @fd
+        result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_ENUM_FMT, pointerof(fmt_desc))
         break if result < 0
 
         description = String.new(fmt_desc.description.to_unsafe)
@@ -91,13 +93,14 @@ module V4cr
     end
 
     # Get current format
-    def get_format : Format
+    def format : Format
       ensure_open
 
       v4l2_format = LibV4L2::V4l2Format.new
       v4l2_format.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_G_FMT, pointerof(v4l2_format))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_G_FMT, pointerof(v4l2_format))
       raise DeviceError.new("Failed to get format") if result < 0
 
       # Cast the format data to pix format
@@ -123,11 +126,12 @@ module V4cr
       pix.value.pixelformat = pixelformat
       pix.value.field = LibV4L2::V4L2_FIELD_INTERLACED
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_S_FMT, pointerof(v4l2_format))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_FMT, pointerof(v4l2_format))
       raise DeviceError.new("Failed to set format") if result < 0
 
       # Get the actual format set by the driver
-      get_format
+      format
     end
 
     # Request buffers for streaming
@@ -139,7 +143,8 @@ module V4cr
       req_bufs.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
       req_bufs.memory = memory_type
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_REQBUFS, pointerof(req_bufs))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_REQBUFS, pointerof(req_bufs))
       raise DeviceError.new("Failed to request buffers") if result < 0
 
       @buffer_manager = BufferManager.new(req_bufs.count, LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE, memory_type)
@@ -149,18 +154,21 @@ module V4cr
         buffer = query_buffer(i.to_u32)
 
         if memory_type == LibV4L2::V4L2_MEMORY_MMAP
-          # Map the buffer
-          ptr = LibC.mmap(nil, buffer.length, LibV4L2::PROT_READ | LibV4L2::PROT_WRITE,
-            LibV4L2::MAP_SHARED, @fd.not_nil!, buffer.offset.not_nil!)
-          raise DeviceError.new("Failed to mmap buffer") if ptr == LibV4L2::MAP_FAILED
-
-          buffer.set_mmap_info(buffer.offset.not_nil!, ptr)
+          if @fd && buffer.offset
+            offset = buffer.offset
+            ptr = LibC.mmap(nil, buffer.length, LibV4L2::PROT_READ | LibV4L2::PROT_WRITE,
+              LibV4L2::MAP_SHARED, @fd.as(Int32), offset ? offset.to_i64 : 0_i64)
+            raise DeviceError.new("Failed to mmap buffer") if ptr == LibV4L2::MAP_FAILED
+            buffer.set_mmap_info(offset || 0_u32, ptr)
+          else
+            raise DeviceError.new("Invalid buffer offset or device fd for mmap")
+          end
         end
 
-        @buffer_manager.not_nil!.add_buffer(buffer)
+        @buffer_manager.add_buffer(buffer)
       end
 
-      @buffer_manager.not_nil!
+      @buffer_manager
     end
 
     # Query a specific buffer
@@ -172,7 +180,8 @@ module V4cr
       v4l2_buf.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
       v4l2_buf.memory = LibV4L2::V4L2_MEMORY_MMAP
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_QUERYBUF, pointerof(v4l2_buf))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_QUERYBUF, pointerof(v4l2_buf))
       raise DeviceError.new("Failed to query buffer") if result < 0
 
       timestamp = Time.unix(v4l2_buf.timestamp.tv_sec) + Time::Span.new(nanoseconds: v4l2_buf.timestamp.tv_usec * 1000)
@@ -194,7 +203,8 @@ module V4cr
       v4l2_buf.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
       v4l2_buf.memory = LibV4L2::V4L2_MEMORY_MMAP
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_QBUF, pointerof(v4l2_buf))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_QBUF, pointerof(v4l2_buf))
       raise DeviceError.new("Failed to queue buffer") if result < 0
     end
 
@@ -211,7 +221,8 @@ module V4cr
       max_retries = 100 # ~1 second timeout with 10ms sleep
 
       loop do
-        result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_DQBUF, pointerof(v4l2_buf))
+        raise DeviceError.new("Device not open") unless @fd
+        result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_DQBUF, pointerof(v4l2_buf))
         if result >= 0
           break
         end
@@ -226,14 +237,14 @@ module V4cr
       end
 
       # Find the buffer in our manager
-      original_buffer = @buffer_manager.not_nil![v4l2_buf.index]
+      original_buffer = @buffer_manager[v4l2_buf.index]
 
       # Update buffer information
       timestamp = Time.unix(v4l2_buf.timestamp.tv_sec) + Time::Span.new(nanoseconds: v4l2_buf.timestamp.tv_usec * 1000)
       Buffer.new(v4l2_buf.index, v4l2_buf.length, v4l2_buf.bytesused,
         v4l2_buf.flags, v4l2_buf.sequence, timestamp).tap do |updated_buffer|
-        if original_buffer.mmap_ptr && original_buffer.mmap_ptr != Pointer(Void).null
-          updated_buffer.set_mmap_info(original_buffer.offset.not_nil!, original_buffer.mmap_ptr.not_nil!)
+        if original_buffer.mmap_ptr != Pointer(Void).null && original_buffer.offset
+          updated_buffer.set_mmap_info(original_buffer.offset.as(UInt32), original_buffer.mmap_ptr)
         end
       end
     end
@@ -243,7 +254,8 @@ module V4cr
       ensure_open
 
       buf_type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_STREAMON, pointerof(buf_type))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_STREAMON, pointerof(buf_type))
       raise DeviceError.new("Failed to start streaming") if result < 0
     end
 
@@ -252,7 +264,8 @@ module V4cr
       ensure_open
 
       buf_type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_STREAMOFF, pointerof(buf_type))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_STREAMOFF, pointerof(buf_type))
       raise DeviceError.new("Failed to stop streaming") if result < 0
     end
 
@@ -265,8 +278,10 @@ module V4cr
       end
 
       # Queue all buffers
-      @buffer_manager.not_nil!.each do |buffer|
-        queue_buffer(buffer)
+      if @buffer_manager
+        @buffer_manager.each do |buffer|
+          queue_buffer(buffer)
+        end
       end
 
       # Start streaming
@@ -279,7 +294,7 @@ module V4cr
         # Re-queue the buffer for next capture
         queue_buffer(buffer)
 
-        return buffer
+        buffer
       ensure
         stop_streaming
       end
@@ -296,7 +311,8 @@ module V4cr
         input = LibV4L2::V4l2Input.new
         input.index = index
 
-        result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_ENUMINPUT, pointerof(input))
+        raise DeviceError.new("Device not open") unless @fd
+        result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_ENUMINPUT, pointerof(input))
         break if result < 0
 
         inputs << String.new(input.name.to_unsafe)
@@ -311,17 +327,19 @@ module V4cr
       ensure_open
 
       input = 0
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_G_INPUT, pointerof(input))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_G_INPUT, pointerof(input))
       raise DeviceError.new("Failed to get current input") if result < 0
 
       input
     end
 
     # Set input
-    def set_input(index : Int32)
+    def input=(index : Int32)
       ensure_open
 
-      result = LibV4L2.ioctl(@fd.not_nil!, LibV4L2::VIDIOC_S_INPUT, pointerof(index))
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_INPUT, pointerof(index))
       raise DeviceError.new("Failed to set input") if result < 0
     end
 
@@ -333,7 +351,7 @@ module V4cr
     def to_s(io)
       io << "Device(path: #{@device_path}, open: #{open?}"
       if @capability
-        io << ", card: #{@capability.not_nil!.card}"
+        io << ", card: #{@capability.card}"
       end
       io << ")"
     end

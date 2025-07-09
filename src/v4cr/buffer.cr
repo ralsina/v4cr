@@ -7,20 +7,20 @@ module V4cr
     getter flags : UInt32
     getter sequence : UInt32
     getter timestamp : Time
-    getter data : Bytes?
+    getter data : Bytes
 
     # For mmap buffers
     getter offset : UInt32?
-    getter mmap_ptr : Void*?
+    getter mmap_ptr : Void*
 
     # For userptr buffers
     getter userptr : UInt64?
 
     def initialize(@index : UInt32, @length : UInt32, @bytesused : UInt32,
                    @flags : UInt32, @sequence : UInt32, @timestamp : Time)
-      @data = nil
+      @data = Bytes.new(0)
       @offset = nil
-      @mmap_ptr = nil
+      @mmap_ptr = Pointer(Void).null
       @userptr = nil
     end
 
@@ -28,14 +28,15 @@ module V4cr
     def set_mmap_info(offset : UInt32, mmap_ptr : Void*)
       @offset = offset
       @mmap_ptr = mmap_ptr
-      # Only create Bytes if we have a valid pointer
       if mmap_ptr != Pointer(Void).null
         @data = Bytes.new(mmap_ptr.as(UInt8*), @length)
+      else
+        @data = Bytes.new(0)
       end
     end
 
     # Set userptr buffer information
-    def set_userptr_info(@userptr : UInt64)
+    def userptr_info=(@userptr : UInt64)
       @data = Bytes.new(Pointer(UInt8).new(@userptr), @length)
     end
 
@@ -60,17 +61,17 @@ module V4cr
     end
 
     # Get the actual data from the buffer
-    def data
-      raise IOError.new("Buffer not mapped") unless @data
-      # Ensure we don't access beyond buffer boundaries
+
+    def read_data
+      # Always return a Bytes, never nil
       bytes_to_read = [@bytesused, @length].min
-      @data.not_nil![0, bytes_to_read]
+      @data[0, bytes_to_read]
     end
 
     # Get the full buffer (including unused space)
+
     def full_buffer
-      raise IOError.new("Buffer not mapped") unless @data
-      @data.not_nil!
+      @data
     end
 
     def to_s(io)

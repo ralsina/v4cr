@@ -40,7 +40,6 @@ class StreamingServer
             {1024_u32, 768_u32},
           ]
 
-          mjpeg_success = false
           mjpeg_formats.each do |width, height|
             begin
               test_device.set_format(width, height, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
@@ -72,21 +71,24 @@ class StreamingServer
 
     @@streaming_fiber = spawn do
       loop do
-        break unless @@device
+        device = @@device
+        break unless device
 
         begin
           # Dequeue a frame from the already-started streaming
-          buffer = @@device.not_nil!.dequeue_buffer
+          device = @@device
+          next unless device
+          buffer = device.dequeue_buffer
 
           # Debug: print first 32 bytes of the buffer for the first frame
           unless ENV["DEBUG_JPEG"]? == "done"
-            debug_bytes = buffer.data[0, Math.min(32, buffer.data.size)].map { |b| "%02X" % b }.join(" ")
-            puts "[DEBUG] First 32 bytes: #{debug_bytes} (size=#{buffer.data.size})"
+            debug_bytes = buffer.read_data[0, Math.min(32, buffer.read_data.size)].map { |byte| "%02X" % byte }.join(" ")
+            puts "[DEBUG] First 32 bytes: #{debug_bytes} (size=#{buffer.read_data.size})"
             ENV["DEBUG_JPEG"] = "done"
           end
 
           # Skip frames that are too small, do not start with JPEG SOI, or do not end with JPEG EOI marker
-          data = buffer.data
+          data = buffer.read_data
           valid_jpeg = buffer.bytesused >= 1000 && data[0] == 0xFF && data[1] == 0xD8 && data[-2] == 0xFF && data[-1] == 0xD9
 
           if valid_jpeg
@@ -99,7 +101,7 @@ class StreamingServer
                 client.response.write("--#{BOUNDARY}\r\n".to_slice)
                 client.response.write("Content-Type: image/jpeg\r\n".to_slice)
                 client.response.write("Content-Length: #{buffer.bytesused}\r\n\r\n".to_slice)
-                client.response.write(buffer.data)
+                client.response.write(buffer.read_data)
                 client.response.write("\r\n".to_slice)
                 client.response.flush
               rescue e
@@ -110,7 +112,8 @@ class StreamingServer
           end
 
           # Always re-queue the buffer for next capture
-          @@device.not_nil!.queue_buffer(buffer)
+          device = @@device
+          device.queue_buffer(buffer) if device
 
           # Remove disconnected clients
           (clients_to_remove || [] of HTTP::Server::Context).each do |client|
@@ -132,9 +135,10 @@ class StreamingServer
     puts "Shutting down..."
     @@streaming_clients.clear
 
-    if @@device
-      @@device.try(&.stop_streaming)
-      @@device.try(&.close)
+    device = @@device
+    if device
+      device.stop_streaming rescue nil
+      device.close rescue nil
     end
   end
 end
@@ -148,13 +152,13 @@ unless device
 end
 
 # Start streaming
-format = device.get_format
+format = device.format
 puts "[DEBUG] Format: #{format.format_name} #{format.width}x#{format.height} sizeimage=#{format.sizeimage}"
 
 device.request_buffers(4)
 
 # Queue all buffers
-device.buffer_manager.not_nil!.each_with_index do |buffer, idx|
+device.buffer_manager.each_with_index do |buffer, idx|
   puts "[DEBUG] Buffer \\##{idx} length: \\#{buffer.length}"
   device.queue_buffer(buffer)
 end
@@ -165,7 +169,7 @@ StreamingServer.start_streaming_fiber
 puts "V4CR MJPEG Streaming Server"
 puts "=========================="
 puts "Device: #{device.query_capability.card}"
-puts "Format: #{device.get_format.format_name} #{device.get_format.width}x#{device.get_format.height}"
+puts "Format: #{device.format.format_name} #{device.format.width}x#{device.format.height}"
 puts "Server starting on http://localhost:3100"
 
 # Main page
@@ -176,9 +180,9 @@ get "/" do
   <head>
     <title>V4CR MJPEG Stream</title>
     <style>
-      body { 
-        font-family: Arial, sans-serif; 
-        text-align: center; 
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
         background-color: #f0f0f0;
         margin: 0;
         padding: 20px;
@@ -231,26 +235,26 @@ get "/" do
   <body>
     <div class="container">
       <h1>V4CR MJPEG Live Stream</h1>
-      
+
       <div class="video-container">
         <img id="stream" src="/stream" alt="Live Video Stream">
       </div>
-      
+
       <div class="controls">
         <button onclick="refreshStream()">Refresh Stream</button>
         <button onclick="toggleFullscreen()">Toggle Fullscreen</button>
       </div>
-      
+
       <div class="info">
         <h3>Stream Information</h3>
         <p><strong>Device:</strong> #{device.query_capability.card}</p>
         <p><strong>Driver:</strong> #{device.query_capability.driver}</p>
-        <p><strong>Format:</strong> #{device.get_format.format_name}</p>
-        <p><strong>Resolution:</strong> #{device.get_format.width}x#{device.get_format.height}</p>
+        <p><strong>Format:</strong> #{device.format.format_name}</p>
+        <p><strong>Resolution:</strong> #{device.format.width}x#{device.format.height}</p>
         <p><strong>Connected Clients:</strong> <span id="client-count">0</span></p>
       </div>
     </div>
-    
+
     <script>
       function refreshStream() {
         const img = document.getElementById('stream');
@@ -258,7 +262,7 @@ get "/" do
         img.src = '';
         img.src = src + '?t=' + new Date().getTime();
       }
-      
+
       function toggleFullscreen() {
         const img = document.getElementById('stream');
         if (img.requestFullscreen) {
@@ -269,7 +273,7 @@ get "/" do
           img.msRequestFullscreen();
         }
       }
-      
+
       // Update client count periodically
       setInterval(function() {
         fetch('/status')
@@ -316,7 +320,7 @@ get "/status" do |env|
   {
     clients: StreamingServer.streaming_clients.size,
     device:  StreamingServer.device.try(&.query_capability.card) || "Unknown",
-    format:  StreamingServer.device.try(&.get_format.format_name) || "Unknown",
+    format:  StreamingServer.device.try(&.format.format_name) || "Unknown",
   }.to_json
 end
 
@@ -326,7 +330,7 @@ at_exit do
 end
 
 # Handle Ctrl+C gracefully
-Signal::INT.trap do
+Process.on_terminate do
   puts "\nReceived interrupt signal, shutting down..."
   StreamingServer.cleanup
   exit(0)
