@@ -92,6 +92,80 @@ module V4cr
       formats
     end
 
+    def supported_resolutions(pixelformat : UInt32)
+      ensure_open
+
+      resolutions = [] of NamedTuple(width: UInt32, height: UInt32)
+      index = 0_u32
+
+      loop do
+        frmsize = LibV4L2::V4l2FrmSizeEnum.new
+        frmsize.index = index
+        frmsize.pixel_format = pixelformat
+
+        raise DeviceError.new("Device not open") unless @fd
+        result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_ENUM_FRAMESIZES, pointerof(frmsize))
+        break if result < 0
+
+        if frmsize.type == LibV4L2::V4L2_FRMSIZE_TYPE_DISCRETE
+          resolutions << {width: frmsize.discrete.width, height: frmsize.discrete.height}
+        elsif frmsize.type == LibV4L2::V4L2_FRMSIZE_TYPE_STEPWISE
+          resolutions << {width: frmsize.stepwise.max_width, height: frmsize.stepwise.max_height}
+        end
+
+        index += 1
+      end
+
+      resolutions
+    end
+
+    # Returns an array of discrete framerates (as {numerator, denominator}), or a single stepwise/continuous range (as a NamedTuple)
+    def supported_framerates(pixelformat : UInt32, width : UInt32, height : UInt32)
+      ensure_open
+
+      framerates = [] of NamedTuple(numerator: UInt32, denominator: UInt32)
+      stepwise_info = nil
+      index = 0_u32
+      frmival_type = nil
+
+      loop do
+        frmival = LibV4L2::V4l2FrmIvalEnum.new
+        frmival.index = index
+        frmival.pixel_format = pixelformat
+        frmival.width = width
+        frmival.height = height
+
+        raise DeviceError.new("Device not open") unless @fd
+        result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_ENUM_FRAMEINTERVALS, pointerof(frmival))
+        break if result < 0
+
+        frmival_type ||= frmival.type
+
+        if frmival.type == LibV4L2::V4L2_FRMIVAL_TYPE_DISCRETE
+          framerates << {numerator: frmival.data.discrete.numerator, denominator: frmival.data.discrete.denominator}
+        elsif frmival.type == LibV4L2::V4L2_FRMIVAL_TYPE_STEPWISE || frmival.type == LibV4L2::V4L2_FRMIVAL_TYPE_CONTINUOUS
+          # Only need to get this once
+          stepwise_info ||= {
+            min:  {numerator: frmival.data.stepwise.min.numerator, denominator: frmival.data.stepwise.min.denominator},
+            max:  {numerator: frmival.data.stepwise.max.numerator, denominator: frmival.data.stepwise.max.denominator},
+            step: {numerator: frmival.data.stepwise.step.numerator, denominator: frmival.data.stepwise.step.denominator},
+            type: frmival.type,
+          }
+          break
+        end
+
+        index += 1
+      end
+
+      if frmival_type == LibV4L2::V4L2_FRMIVAL_TYPE_DISCRETE
+        framerates
+      elsif stepwise_info
+        stepwise_info
+      else
+        [] of NamedTuple(numerator: UInt32, denominator: UInt32)
+      end
+    end
+
     # Get current format
     def format : Format
       ensure_open

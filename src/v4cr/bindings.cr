@@ -1,3 +1,8 @@
+@[Link("c")]
+lib LibC
+  fun memset(s : Void*, c : Int32, n : LibC::SizeT) : Void*
+end
+
 require "lib_c"
 
 module V4cr
@@ -5,24 +10,26 @@ module V4cr
   @[Link("c")]
   lib LibV4L2
     # v4l2 constants
-    VIDIOC_QUERYCAP  = 0x80685600_u32
-    VIDIOC_ENUM_FMT  = 0xc0405602_u32
-    VIDIOC_G_FMT     = 0xc0d05604_u32
-    VIDIOC_S_FMT     = 0xc0d05605_u32
-    VIDIOC_REQBUFS   = 0xc0145608_u32
-    VIDIOC_QUERYBUF  = 0xc0585609_u32
-    VIDIOC_QBUF      = 0xc058560f_u32
-    VIDIOC_DQBUF     = 0xc0585611_u32
-    VIDIOC_STREAMON  = 0x40045612_u32
-    VIDIOC_STREAMOFF = 0x40045613_u32
-    VIDIOC_G_PARM    = 0xc0cc5615_u32
-    VIDIOC_S_PARM    = 0xc0cc5616_u32
-    VIDIOC_G_CTRL    = 0xc008561b_u32
-    VIDIOC_S_CTRL    = 0xc008561c_u32
-    VIDIOC_QUERYCTRL = 0xc0445624_u32
-    VIDIOC_G_INPUT   = 0x80045626_u32
-    VIDIOC_S_INPUT   = 0xc0045627_u32
-    VIDIOC_ENUMINPUT = 0xc050561a_u32
+    VIDIOC_QUERYCAP            = 0x80685600_u32
+    VIDIOC_ENUM_FMT            = 0xc0405602_u32
+    VIDIOC_G_FMT               = 0xc0d05604_u32
+    VIDIOC_S_FMT               = 0xc0d05605_u32
+    VIDIOC_REQBUFS             = 0xc0145608_u32
+    VIDIOC_QUERYBUF            = 0xc0585609_u32
+    VIDIOC_QBUF                = 0xc058560f_u32
+    VIDIOC_DQBUF               = 0xc0585611_u32
+    VIDIOC_STREAMON            = 0x40045612_u32
+    VIDIOC_STREAMOFF           = 0x40045613_u32
+    VIDIOC_G_PARM              = 0xc0cc5615_u32
+    VIDIOC_S_PARM              = 0xc0cc5616_u32
+    VIDIOC_G_CTRL              = 0xc008561b_u32
+    VIDIOC_S_CTRL              = 0xc008561c_u32
+    VIDIOC_QUERYCTRL           = 0xc0445624_u32
+    VIDIOC_G_INPUT             = 0x80045626_u32
+    VIDIOC_S_INPUT             = 0xc0045627_u32
+    VIDIOC_ENUMINPUT           = 0xc050561a_u32
+    VIDIOC_ENUM_FRAMESIZES     = 0xc02c564a_u32
+    VIDIOC_ENUM_FRAMEINTERVALS = 0xc048564b_u32
 
     # Capability flags
     V4L2_CAP_VIDEO_CAPTURE = 0x00000001_u32
@@ -46,6 +53,12 @@ module V4cr
     V4L2_FIELD_TOP        = 2_u32
     V4L2_FIELD_BOTTOM     = 3_u32
     V4L2_FIELD_INTERLACED = 4_u32
+
+    V4L2_FRMSIZE_TYPE_DISCRETE   = 1_u32
+    V4L2_FRMIVAL_TYPE_DISCRETE   = 1_u32
+    V4L2_FRMSIZE_TYPE_STEPWISE   = 2_u32
+    V4L2_FRMIVAL_TYPE_STEPWISE   = 2_u32
+    V4L2_FRMIVAL_TYPE_CONTINUOUS = 3_u32
 
     # Pixel formats (common ones)
     V4L2_PIX_FMT_RGB332  = 0x31424752_u32
@@ -176,6 +189,59 @@ module V4cr
       status : UInt32
       capabilities : UInt32
       reserved : UInt32[3]
+    end
+
+    struct V4l2FrmSizeEnum
+      index : UInt32
+      pixel_format : UInt32
+      type : UInt32
+      discrete : V4l2FrmSizeDiscrete
+      stepwise : V4l2FrmSizeStepwise
+      reserved : UInt32[2]
+    end
+
+    struct V4l2FrmSizeDiscrete
+      width : UInt32
+      height : UInt32
+    end
+
+    struct V4l2FrmSizeStepwise
+      min_width : UInt32
+      max_width : UInt32
+      step_width : UInt32
+      min_height : UInt32
+      max_height : UInt32
+      step_height : UInt32
+    end
+
+    @[Packed]
+    union V4l2FrmIvalData
+      discrete : V4l2Fract
+      stepwise : V4l2Stepwise
+    end
+
+    struct V4l2FrmIvalEnum
+      index : UInt32
+      pixel_format : UInt32
+      width : UInt32
+      height : UInt32
+      type : UInt32
+      data : V4l2FrmIvalData
+      reserved : UInt32[2]
+      padding : UInt8[4]
+    end
+
+    @[Packed]
+    struct V4l2Fract
+      numerator : UInt32
+      denominator : UInt32
+    end
+
+    @[Packed]
+    struct V4l2Stepwise
+      min : V4l2Fract
+      max : V4l2Fract
+      step : V4l2Fract
     end
 
     # We'll use LibC functions directly in the code
