@@ -209,7 +209,7 @@ module V4cr
     end
 
     # Set JPEG compression quality
-    def set_jpeg_quality(quality : Int32)
+    def jpeg_quality=(quality : Int32)
       ensure_open
 
       control = LibV4L2::V4l2Control.new

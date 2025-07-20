@@ -153,7 +153,7 @@ end
 
 # Set JPEG quality
 begin
-  device.set_jpeg_quality(70)
+  device.jpeg_quality = 70
   puts "JPEG quality set to 70"
 rescue e
   puts "Could not set JPEG quality: #{e.message}"
