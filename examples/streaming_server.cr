@@ -1,11 +1,34 @@
 require "kemal"
 require "../src/v4cr"
+require "option_parser"
+
+# --- Command-line options ---
+device_path : String? = nil
+jpeg_quality = 70
+fps = 30
+resolution = {1280_u32, 720_u32}
+
+OptionParser.parse do |parser|
+  parser.banner = "V4CR MJPEG Streaming Server"
+  parser.on("-d DEVICE", "--device=DEVICE", "Video device path (e.g., /dev/video0)") { |d| device_path = d }
+  parser.on("-q QUALITY", "--quality=QUALITY", "JPEG quality (1-100, default: 70)") { |q| jpeg_quality = q.to_i }
+  parser.on("-f FPS", "--fps=FPS", "Frames per second (default: 30)") { |f| fps = f.to_i }
+  parser.on("-r WxH", "--resolution=WxH", "Resolution (e.g., 1920x1080)") do |r|
+    width, height = r.split('x').map(&.to_u32)
+    resolution = {width, height}
+  end
+  parser.on("-h", "--help", "Show this help") do
+    puts parser
+    exit
+  end
+end
 
 # Global variables for the streaming device
 class StreamingServer
   @@device : V4cr::Device? = nil
   @@streaming_fiber : Fiber? = nil
   @@streaming_clients = [] of HTTP::Server::Context
+  @@fps = 30
 
   # MJPEG streaming boundary
   BOUNDARY = "frame"
@@ -18,47 +41,49 @@ class StreamingServer
     @@streaming_clients
   end
 
+  def self.fps=(new_fps)
+    @@fps = new_fps
+  end
+
   # Find and initialize the video device
-  def self.initialize_device
-    # Find first capture device
-    0.upto(9) do |i|
-      device_path = "/dev/video#{i}"
-      next unless File.exists?(device_path)
+  def self.initialize_device(device_path : String?, resolution : {UInt32, UInt32})
+    devices_to_check = if device_path
+                         [device_path]
+                       else
+                         (0..9).map { |i| "/dev/video#{i}" }
+                       end
+
+    devices_to_check.each do |path|
+      next unless File.exists?(path)
 
       begin
-        test_device = V4cr::Device.new(device_path)
+        test_device = V4cr::Device.new(path)
         test_device.open
 
         capability = test_device.query_capability
         if capability.video_capture?
-          # Try to set MJPEG format with different resolutions
-          mjpeg_formats = [
-            {1920_u32, 1080_u32},
-            {320_u32, 240_u32},
-            {640_u32, 480_u32},
-            {800_u32, 600_u32},
-            {1024_u32, 768_u32},
-          ]
-
-          mjpeg_formats.each do |width, height|
-            begin
-              test_device.set_format(width, height, V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
-              puts "Using device: #{device_path} (#{capability.card}) - MJPEG #{width}x#{height}"
-              @@device = test_device
-              return test_device
-            rescue e
-              # Try next resolution
+          begin
+            test_device.set_format(resolution[0], resolution[1], V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
+            puts "Using device: #{path} (#{capability.card}) - MJPEG #{resolution[0]}x#{resolution[1]}"
+            @@device = test_device
+            return test_device
+          rescue e
+            puts "Device #{path} doesn't support MJPG at #{resolution[0]}x#{resolution[1]}"
+            # List available formats
+            puts "Available formats:"
+            test_device.supported_formats.each do |format|
+              puts "  - #{format.description}"
+              test_device.supported_resolutions(format.pixelformat).each do |resolution|
+                puts "    - #{resolution[:width]}x#{resolution[:height]}"
+              end
             end
+            test_device.close
           end
-
-          # If MJPEG failed, this device is not suitable for streaming
-          puts "Device #{device_path} doesn't support MJPG format"
-          test_device.close
         else
           test_device.close
         end
       rescue e
-        puts "Error with device #{device_path}: #{e.message}"
+        puts "Error with device #{path}: #{e.message}"
       end
     end
 
@@ -76,18 +101,9 @@ class StreamingServer
 
         begin
           # Dequeue a frame from the already-started streaming
-          device = @@device
-          next unless device
           buffer = device.dequeue_buffer
 
-          # Debug: print first 32 bytes of the buffer for the first frame
-          unless ENV["DEBUG_JPEG"]? == "done"
-            debug_bytes = buffer.read_data[0, Math.min(32, buffer.read_data.size)].map { |byte| "%02X" % byte }.join(" ")
-            puts "[DEBUG] First 32 bytes: #{debug_bytes} (size=#{buffer.read_data.size})"
-            ENV["DEBUG_JPEG"] = "done"
-          end
-
-          # Skip frames that are too small, do not start with JPEG SOI, or do not end with JPEG EOI marker
+          # Skip frames that are too small or invalid
           data = buffer.read_data
           valid_jpeg = buffer.bytesused >= 1000 && data[0] == 0xFF && data[1] == 0xD8 && data[-2] == 0xFF && data[-1] == 0xD9
 
@@ -109,20 +125,18 @@ class StreamingServer
                 clients_to_remove << client
               end
             end
+
+            # Remove disconnected clients
+            clients_to_remove.each do |client|
+              @@streaming_clients.delete(client)
+            end
           end
 
           # Always re-queue the buffer for next capture
-          device = @@device
-          device.queue_buffer(buffer) if device
+          device.queue_buffer(buffer)
 
-          # Remove disconnected clients
-          (clients_to_remove || [] of HTTP::Server::Context).each do |client|
-            @@streaming_clients.delete(client)
-          end
-
-          # Small delay to control frame rate
-          sleep(33.milliseconds) # ~30 FPS
-
+          # Control frame rate
+          sleep((1.0 / @@fps).seconds)
         rescue e
           puts "Streaming error: #{e.message}"
           sleep(1.second)
@@ -143,42 +157,44 @@ class StreamingServer
   end
 end
 
+# --- Main application ---
+
 # Initialize device on startup
-device = StreamingServer.initialize_device
+device = StreamingServer.initialize_device(device_path, resolution)
 unless device
   puts "No suitable video device found!"
   puts "This server requires a device that supports MJPG format."
+  puts "If you have a device, try specifying it with -d /dev/videoX"
   exit(1)
 end
 
 # Set JPEG quality
 begin
-  device.jpeg_quality = 70
-  puts "JPEG quality set to 70"
+  device.jpeg_quality = jpeg_quality
+  puts "JPEG quality set to #{jpeg_quality}"
 rescue e
   puts "Could not set JPEG quality: #{e.message}"
 end
 
+# Set FPS
+StreamingServer.fps = fps
+puts "Target FPS set to #{fps}"
+
 # Start streaming
-format = device.format
-puts "[DEBUG] Format: #{format.format_name} #{format.width}x#{format.height} sizeimage=#{format.sizeimage}"
-
 device.request_buffers(4)
-
-# Queue all buffers
-device.buffer_manager.each_with_index do |buffer, idx|
-  puts "[DEBUG] Buffer \##{idx} length: \#{buffer.length}"
-  device.queue_buffer(buffer)
-end
-
+device.buffer_manager.each { |buffer| device.queue_buffer(buffer) }
 device.start_streaming
 StreamingServer.start_streaming_fiber
 
-puts "V4CR MJPEG Streaming Server"
-puts "=========================="
+puts "
+V4CR MJPEG Streaming Server"
+puts "==========================="
 puts "Device: #{device.query_capability.card}"
 puts "Format: #{device.format.format_name} #{device.format.width}x#{device.format.height}"
 puts "Server starting on http://localhost:3100"
+puts "Press Ctrl+C to exit."
+
+# --- Kemal web server ---
 
 # Main page
 get "/" do
@@ -259,6 +275,8 @@ get "/" do
         <p><strong>Driver:</strong> #{device.query_capability.driver}</p>
         <p><strong>Format:</strong> #{device.format.format_name}</p>
         <p><strong>Resolution:</strong> #{device.format.width}x#{device.format.height}</p>
+        <p><strong>Target FPS:</strong> #{fps}</p>
+        <p><strong>JPEG Quality:</strong> #{jpeg_quality}</p>
         <p><strong>Connected Clients:</strong> <span id="client-count">0</span></p>
       </div>
     </div>
@@ -311,9 +329,7 @@ get "/stream" do |env|
 
   # Keep connection open
   begin
-    loop do
-      ::sleep(1.seconds)
-    end
+    loop { sleep(1.second) }
   rescue e
     puts "Client disconnected: #{e.message}"
   ensure
