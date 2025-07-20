@@ -45,8 +45,8 @@ module V4cr
         "YUV420"
       when LibV4L2::V4L2_PIX_FMT_YUV422P
         "YUV422P"
-      when LibV4L2::V4L2_PIX_FMT_MJPEG
-        "MJPEG"
+      when LibV4L2::V4L2_PIX_FMT_MJPG
+        "MJPG"
       when LibV4L2::V4L2_PIX_FMT_JPEG
         "JPEG"
       else
@@ -123,7 +123,7 @@ module V4cr
         (width * height * 3) // 2
       when LibV4L2::V4L2_PIX_FMT_YUV422P
         width * height * 2
-      when LibV4L2::V4L2_PIX_FMT_MJPEG, LibV4L2::V4L2_PIX_FMT_JPEG
+      when LibV4L2::V4L2_PIX_FMT_MJPG, LibV4L2::V4L2_PIX_FMT_JPEG
         width * height # Compressed format, estimate
       else
         width * height * 2 # Default assumption

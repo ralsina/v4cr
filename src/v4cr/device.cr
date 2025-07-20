@@ -208,6 +208,19 @@ module V4cr
       format
     end
 
+    # Set JPEG compression quality
+    def set_jpeg_quality(quality : Int32)
+      ensure_open
+
+      control = LibV4L2::V4l2Control.new
+      control.id = LibV4L2::V4L2_CID_JPEG_COMPRESSION_QUALITY
+      control.value = quality
+
+      raise DeviceError.new("Device not open") unless @fd
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_CTRL, pointerof(control))
+      raise DeviceError.new("Failed to set JPEG quality") if result < 0
+    end
+
     # Request buffers for streaming
     def request_buffers(count : UInt32, memory_type : UInt32 = LibV4L2::V4L2_MEMORY_MMAP) : BufferManager
       ensure_open

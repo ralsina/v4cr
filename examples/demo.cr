@@ -121,7 +121,7 @@ def capture_example(device_path : String)
 
     # Try MJPEG first, fall back to YUYV
     format = begin
-      device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
+      device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
     rescue
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end
@@ -178,7 +178,7 @@ def streaming_example(device_path : String)
 
     # Try MJPEG first, fall back to YUYV
     format = begin
-      device.set_format(320, 240, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
+      device.set_format(320, 240, V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
     rescue
       device.set_format(320, 240, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end
@@ -241,7 +241,7 @@ def save_frames_example(device_path : String, count : Int32 = 5000)
 
     # Try MJPEG first, fall back to YUYV
     format = begin
-      device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
+      device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
     rescue
       device.set_format(640, 480, V4cr::LibV4L2::V4L2_PIX_FMT_YUYV)
     end

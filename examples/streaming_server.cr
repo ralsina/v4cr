@@ -42,7 +42,7 @@ class StreamingServer
 
           mjpeg_formats.each do |width, height|
             begin
-              test_device.set_format(width, height, V4cr::LibV4L2::V4L2_PIX_FMT_MJPEG)
+              test_device.set_format(width, height, V4cr::LibV4L2::V4L2_PIX_FMT_MJPG)
               puts "Using device: #{device_path} (#{capability.card}) - MJPEG #{width}x#{height}"
               @@device = test_device
               return test_device
@@ -52,7 +52,7 @@ class StreamingServer
           end
 
           # If MJPEG failed, this device is not suitable for streaming
-          puts "Device #{device_path} doesn't support MJPEG format"
+          puts "Device #{device_path} doesn't support MJPG format"
           test_device.close
         else
           test_device.close
@@ -147,8 +147,16 @@ end
 device = StreamingServer.initialize_device
 unless device
   puts "No suitable video device found!"
-  puts "This server requires a device that supports MJPEG format."
+  puts "This server requires a device that supports MJPG format."
   exit(1)
+end
+
+# Set JPEG quality
+begin
+  device.set_jpeg_quality(70)
+  puts "JPEG quality set to 70"
+rescue e
+  puts "Could not set JPEG quality: #{e.message}"
 end
 
 # Start streaming
