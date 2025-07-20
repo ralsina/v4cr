@@ -10,10 +10,10 @@ resolution = {1280_u32, 720_u32}
 
 OptionParser.parse do |parser|
   parser.banner = "V4CR MJPEG Streaming Server"
-  parser.on("-d DEVICE", "--device=DEVICE", "Video device path (e.g., /dev/video0)") { |d| device_path = d }
-  parser.on("-q QUALITY", "--quality=QUALITY", "JPEG quality (1-100, default: 70)") { |q| jpeg_quality = q.to_i }
-  parser.on("-f FPS", "--fps=FPS", "Frames per second (default: 30)") { |f| fps = f.to_i }
-  parser.on("-r WxH", "--resolution=WxH", "Resolution (e.g., 1920x1080)") do |r|
+  parser.on("-d DEVICE", "--device=DEVICE", "Video device path (e.g., /dev/video0)") { |device_arg| device_path = device_arg }
+  parser.on("-q QUALITY", "--quality=QUALITY", "JPEG quality (1-100, default: 70)") { |quality_arg| jpeg_quality = quality_arg.to_i }
+  parser.on("-f FPS", "--fps=FPS", "Frames per second (default: 30)") { |fps_arg| fps = fps_arg.to_i }
+  parser.on("-r WxH", "--resolution=WxH", "Resolution (e.g., 1920x1080)") do |_|
     width, height = r.split('x').map(&.to_u32)
     resolution = {width, height}
   end
@@ -73,8 +73,8 @@ class StreamingServer
             puts "Available formats:"
             test_device.supported_formats.each do |format|
               puts "  - #{format.description}"
-              test_device.supported_resolutions(format.pixelformat).each do |resolution|
-                puts "    - #{resolution[:width]}x#{resolution[:height]}"
+              test_device.supported_resolutions(format.pixelformat).each do |res|
+                puts "    - #{res[:width]}x#{res[:height]}"
               end
             end
             test_device.close
@@ -134,9 +134,6 @@ class StreamingServer
 
           # Always re-queue the buffer for next capture
           device.queue_buffer(buffer)
-
-          # Control frame rate
-          sleep((1.0 / @@fps).seconds)
         rescue e
           puts "Streaming error: #{e.message}"
           sleep(1.second)
@@ -177,8 +174,12 @@ rescue e
 end
 
 # Set FPS
-StreamingServer.fps = fps
-puts "Target FPS set to #{fps}"
+begin
+  device.framerate = fps.to_u32
+  puts "Target FPS set to #{fps}"
+rescue e
+  puts "Could not set framerate: #{e.message}"
+end
 
 # Start streaming
 device.request_buffers(4)

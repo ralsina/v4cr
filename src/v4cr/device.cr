@@ -202,7 +202,11 @@ module V4cr
 
       raise DeviceError.new("Device not open") unless @fd
       result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_FMT, pointerof(v4l2_format))
-      raise DeviceError.new("Failed to set format") if result < 0
+      puts "[DEBUG] ioctl VIDIOC_S_FMT result: #{result}"
+      if result < 0
+        puts "[DEBUG] errno: #{Errno.value} (\#{String.new(LibC.strerror(Errno.value))})"
+        raise DeviceError.new("Failed to set format: \#{String.new(LibC.strerror(perror))}")
+      end
 
       # Get the actual format set by the driver
       format
@@ -219,6 +223,24 @@ module V4cr
       raise DeviceError.new("Device not open") unless @fd
       result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_CTRL, pointerof(control))
       raise DeviceError.new("Failed to set JPEG quality") if result < 0
+    end
+
+    # Set framerate
+    def framerate=(fps : UInt32)
+      ensure_open
+
+      parm = LibV4L2::V4l2Streamparm.new
+      parm.type = LibV4L2::V4L2_BUF_TYPE_VIDEO_CAPTURE
+
+      # Get current parameters first to avoid overwriting other settings
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_G_PARM, pointerof(parm))
+      raise DeviceError.new("Failed to get stream parameters") if result < 0
+
+      parm.parm.capture.timeperframe.numerator = 1
+      parm.parm.capture.timeperframe.denominator = fps
+
+      result = LibV4L2.ioctl(@fd.as(Int32), LibV4L2::VIDIOC_S_PARM, pointerof(parm))
+      raise DeviceError.new("Failed to set framerate") if result < 0
     end
 
     # Request buffers for streaming

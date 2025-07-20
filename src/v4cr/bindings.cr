@@ -82,6 +82,19 @@ module V4cr
     V4L2_BUF_FLAG_ERROR  = 0x00000040_u32
 
     # Structures
+    @[Packed]
+    struct V4l2Fract
+      numerator : UInt32
+      denominator : UInt32
+    end
+
+    @[Packed]
+    struct V4l2Stepwise
+      min : V4l2Fract
+      max : V4l2Fract
+      step : V4l2Fract
+    end
+
     struct V4l2Capability
       driver : UInt8[16]
       card : UInt8[32]
@@ -191,6 +204,35 @@ module V4cr
       reserved : UInt32[3]
     end
 
+    struct V4l2Captureparm
+      capability : UInt32
+      capturemode : UInt32
+      timeperframe : V4l2Fract
+      extendedmode : UInt32
+      readbuffers : UInt32
+      reserved : UInt32[4]
+    end
+
+    struct V4l2Outputparm
+      capability : UInt32
+      outputmode : UInt32
+      timeperframe : V4l2Fract
+      extendedmode : UInt32
+      writebuffers : UInt32
+      reserved : UInt32[4]
+    end
+
+    union V4l2StreamparmUnion
+      capture : V4l2Captureparm
+      output : V4l2Outputparm
+      raw_data : UInt8[200]
+    end
+
+    struct V4l2Streamparm
+      type : UInt32
+      parm : V4l2StreamparmUnion
+    end
+
     struct V4l2FrmSizeEnum
       index : UInt32
       pixel_format : UInt32
@@ -229,19 +271,6 @@ module V4cr
       data : V4l2FrmIvalData
       reserved : UInt32[2]
       padding : UInt8[4]
-    end
-
-    @[Packed]
-    struct V4l2Fract
-      numerator : UInt32
-      denominator : UInt32
-    end
-
-    @[Packed]
-    struct V4l2Stepwise
-      min : V4l2Fract
-      max : V4l2Fract
-      step : V4l2Fract
     end
 
     # We'll use LibC functions directly in the code

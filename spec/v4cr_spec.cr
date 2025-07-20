@@ -16,8 +16,8 @@ describe V4cr do
 
     it "can be closed multiple times safely" do
       device = V4cr::Device.new("/dev/video0")
-      device.close  # Should not raise
-      device.close  # Should not raise
+      device.close # Should not raise
+      device.close # Should not raise
     end
   end
 
